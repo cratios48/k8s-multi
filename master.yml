@@ -161,4 +161,4 @@
 
   tasks:
     - name: Join k8s cluster
-      shell: "{{ join_command['stdout'] }}"
+      shell: "{{ hostvars.master.join_command.stdout }}"
