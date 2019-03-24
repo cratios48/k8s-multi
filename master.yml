@@ -2,6 +2,8 @@
 - hosts: all
   become: true
   become_method: sudo
+  vars:
+    sysctl_file: "/etc/sysctl.d/k8s.conf"
   
   tasks:
     - name: Set timezone to Seoul
@@ -72,7 +74,7 @@
     - name: Copy conf file for CentOS 7's bridge problem
       copy:
         src: /vagrant/k8s.conf
-        dest: /etc/sysctl.d/k8s.conf
+        dest: "{{ sysctl_file }}"
         owner: root
         group: root
         mode: 0644
@@ -81,6 +83,20 @@
       modprobe:
         name: br_netfilter
         state: present
+
+    - name: Reload sysctl option for bridge problem for ipv4
+      sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: 1
+        sysctl_file: "{{ sysctl_file }}"
+        reload: yes
+
+    - name: Reload sysctl option for bridge problem for ipv6
+      sysctl:
+        name: net.bridge.bridge-nf-call-ip6tables
+        value: 1
+        sysctl_file: "{{ sysctl_file }}"
+        reload: yes
 
     - name: Install kubelet, kubeadm, kubectl
       yum:
