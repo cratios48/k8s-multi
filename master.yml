@@ -1,0 +1,164 @@
+---
+- hosts: all
+  become: true
+  become_method: sudo
+  
+  tasks:
+    - name: Set timezone to Seoul
+      timezone:
+        name: Asia/Seoul
+
+    - name: Update OS
+      yum:
+        name: '*'
+        state: latest
+
+    - name: Disable SWAP
+      shell:
+        swapoff -a
+
+    - name: Delete SWAP from fstab
+      lineinfile:
+        path: /etc/fstab
+        regexp: '.*swap.*'
+        state: absent
+
+    - name: Install dependency for selinux
+      yum:
+        name: libselinux-python
+        state: latest
+
+    - name: Disable SELinux
+      selinux:
+        policy: targeted
+        state: permissive
+
+    - name: Install dependency for docker
+      yum:
+        name:
+          - yum-utils
+          - device-mapper-persistent-data
+          - lvm2
+
+    - name: Set repo for docker
+      get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Install Docker
+      yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+
+    - name: Start and enable docker
+      service:
+        name: docker
+        state: started
+        enabled: true
+    
+    - name: Copy kubectl repo
+      copy:
+        src: /vagrant/kubernetes.repo
+        dest: /etc/yum.repos.d/
+        owner: root
+        group: root
+        mode: 0644
+    
+    - name: Copy conf file for CentOS 7's bridge problem
+      copy:
+        src: /vagrant/k8s.conf
+        dest: /etc/sysctl.d/k8s.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Load module for CentOS 7's bridge problem
+      modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Install kubelet, kubeadm, kubectl
+      yum:
+        name: 
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: latest
+
+- hosts: master
+  become: true
+  become_method: sudo
+  vars:
+    kubecfg: /etc/kubernetes/admin.conf
+
+  tasks:
+    - name: Install Vim
+      yum: 
+        name: vim
+        state: latest
+
+    - name: Enable kubelet
+      service:
+        name: kubelet
+        state: restarted
+        enabled: true
+
+    - name: Init k8s adm
+      shell: 
+        kubeadm init 
+        --apiserver-advertise-address=10.10.10.10 \
+        --pod-network-cidr=10.244.0.0/16 \
+        --ignore-preflight-errors=all
+      args:
+        creates: /var/lib/kubelet/config.yaml
+
+    - name: Configure k8s admin for root
+      lineinfile:
+        path: /root/.bashrc
+        line: 'export KUBECONFIG={{ kubecfg }}'
+        state: present
+
+    - name: Install python module setuptools
+      pip:
+        name: setuptools
+        extra_args: -U
+
+    - name: Install python module for k8s
+      pip:
+        name: openshift
+        extra_args: --ignore-installed
+
+    - name: Get yaml file for kube-router
+      get_url:
+        url: https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter.yaml
+        dest: /tmp/
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Wait until the k8s system api server up
+      wait_for:
+        port: 6443
+
+    - name: Deploy kube-router for k8s
+      k8s:
+        src: /tmp/kubeadm-kuberouter.yaml
+        kubeconfig: '{{ kubecfg }}'
+        state: present
+
+    - name: Make join command
+      shell: "kubeadm token create --print-join-command"
+      register: join_command
+
+- hosts: nodes
+  become: true
+  become_method: sudo
+
+  tasks:
+    - name: Join k8s cluster
+      shell: "{{ join_command['stdout'] }}"
