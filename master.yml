@@ -106,6 +106,13 @@
           - kubectl
         state: latest
 
+    - name: Register node ip to kubelet
+      lineinfile:
+        path: /etc/sysconfig/kubelet
+        regexp: '^KUBELET_EXTRA_ARGS=.*'
+        line: 'KUBELET_EXTRA_ARGS=--node-ip={{ ansible_facts["eth1"]["ipv4"]["address"] }}'
+        state: present
+
 - hosts: master
   become: true
   become_method: sudo
